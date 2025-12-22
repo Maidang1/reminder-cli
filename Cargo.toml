@@ -23,4 +23,3 @@ uuid = { version = "1.6", features = ["v4", "serde"] }
 dirs = "5.0"
 anyhow = "1.0"
 thiserror = "1.0"
-daemonize = "0.5"

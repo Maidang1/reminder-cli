@@ -19,6 +19,8 @@ jobs:
             os: macos-latest
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
 
     runs-on: ${{ matrix.os }}
 
@@ -37,18 +39,32 @@ jobs:
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Package
+      - name: Package (Unix)
+        if: matrix.os != 'windows-latest'
         shell: bash
         run: |
           cd target/${{ matrix.target }}/release
           tar -czvf ../../../reminder-cli-${{ matrix.target }}.tar.gz reminder
-          cd ../../..
 
-      - name: Upload artifact
+      - name: Package (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path target/${{ matrix.target }}/release/reminder.exe -DestinationPath reminder-cli-${{ matrix.target }}.zip
+
+      - name: Upload artifact (Unix)
+        if: matrix.os != 'windows-latest'
         uses: actions/upload-artifact@v4
         with:
           name: reminder-cli-${{ matrix.target }}
           path: reminder-cli-${{ matrix.target }}.tar.gz
+
+      - name: Upload artifact (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: reminder-cli-${{ matrix.target }}
+          path: reminder-cli-${{ matrix.target }}.zip
 
   release:
     needs: build
@@ -67,10 +83,11 @@ jobs:
       - name: Prepare release files
         run: |
           mkdir release
-          mv artifacts/*/*.tar.gz release/
+          mv artifacts/*/*.tar.gz release/ 2>/dev/null || true
+          mv artifacts/*/*.zip release/ 2>/dev/null || true
           cd release
-          for f in *.tar.gz; do
-            shasum -a 256 "$f" >> checksums.txt
+          for f in *.tar.gz *.zip; do
+            [ -f "$f" ] && shasum -a 256 "$f" >> checksums.txt
           done
 
       - name: Create Release
@@ -78,6 +95,7 @@ jobs:
         with:
           files: |
             release/*.tar.gz
+            release/*.zip
             release/checksums.txt
           generate_release_notes: true
 
