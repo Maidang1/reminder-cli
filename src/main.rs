@@ -5,6 +5,7 @@ use cron::Schedule;
 use reminder_cli::daemon::{daemon_status, run_daemon_loop, start_daemon, stop_daemon};
 use reminder_cli::reminder::{Reminder, ReminderSchedule};
 use reminder_cli::storage::Storage;
+use std::path::PathBuf;
 use std::str::FromStr;
 use tabled::settings::object::{Columns, Object, Rows};
 use tabled::settings::{Color, Modify, Style, Width};
@@ -78,6 +79,24 @@ enum Commands {
         #[command(subcommand)]
         action: DaemonAction,
     },
+
+    /// Export reminders to a JSON file
+    Export {
+        /// Output file path
+        #[arg(short, long, default_value = "reminders_export.json")]
+        output: PathBuf,
+    },
+
+    /// Import reminders from a JSON file
+    Import {
+        /// Input file path
+        #[arg(short, long)]
+        input: PathBuf,
+
+        /// Overwrite existing reminders with same ID
+        #[arg(short = 'f', long, default_value = "false")]
+        overwrite: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -122,6 +141,10 @@ fn main() -> Result<()> {
             DaemonAction::Status => daemon_status(),
             DaemonAction::Run => run_daemon_loop(),
         },
+
+        Commands::Export { output } => export_reminders(&storage, &output),
+
+        Commands::Import { input, overwrite } => import_reminders(&storage, &input, overwrite),
     }
 }
 
@@ -336,5 +359,27 @@ fn edit_reminder(
         println!("✗ Reminder not found with ID: {}", id);
     }
 
+    Ok(())
+}
+
+fn export_reminders(storage: &Storage, output: &PathBuf) -> Result<()> {
+    let count = storage.export_to_file(output)?;
+    println!("✓ Exported {} reminder(s) to {}", count, output.display());
+    Ok(())
+}
+
+fn import_reminders(storage: &Storage, input: &PathBuf, overwrite: bool) -> Result<()> {
+    if !input.exists() {
+        bail!("Import file not found: {}", input.display());
+    }
+
+    let (imported, skipped) = storage.import_from_file(input, overwrite)?;
+    
+    println!("✓ Import completed:");
+    println!("  Imported: {} reminder(s)", imported);
+    if skipped > 0 {
+        println!("  Skipped: {} reminder(s) (duplicate IDs, use -f to overwrite)", skipped);
+    }
+    
     Ok(())
 }

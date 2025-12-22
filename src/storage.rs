@@ -1,7 +1,7 @@
 use crate::reminder::Reminder;
 use anyhow::{Context, Result};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 pub struct Storage {
@@ -101,5 +101,54 @@ impl Storage {
         
         fs::create_dir_all(&data_dir)?;
         Ok(data_dir.join("daemon.log"))
+    }
+
+    /// Export all reminders to a JSON file
+    pub fn export_to_file(&self, path: &Path) -> Result<usize> {
+        let reminders = self.load()?;
+        let count = reminders.len();
+        
+        let content = serde_json::to_string_pretty(&reminders)
+            .context("Failed to serialize reminders for export")?;
+        
+        fs::write(path, content)
+            .context("Failed to write export file")?;
+        
+        Ok(count)
+    }
+
+    /// Import reminders from a JSON file
+    /// Returns (imported_count, skipped_count)
+    pub fn import_from_file(&self, path: &Path, overwrite: bool) -> Result<(usize, usize)> {
+        let content = fs::read_to_string(path)
+            .context("Failed to read import file")?;
+        
+        let imported: Vec<Reminder> = serde_json::from_str(&content)
+            .context("Failed to parse import JSON")?;
+        
+        let mut existing = self.load()?;
+        let existing_ids: std::collections::HashSet<Uuid> = 
+            existing.iter().map(|r| r.id).collect();
+        
+        let mut imported_count = 0;
+        let mut skipped_count = 0;
+        
+        for reminder in imported {
+            if existing_ids.contains(&reminder.id) {
+                if overwrite {
+                    existing.retain(|r| r.id != reminder.id);
+                    existing.push(reminder);
+                    imported_count += 1;
+                } else {
+                    skipped_count += 1;
+                }
+            } else {
+                existing.push(reminder);
+                imported_count += 1;
+            }
+        }
+        
+        self.save(&existing)?;
+        Ok((imported_count, skipped_count))
     }
 }
