@@ -6,6 +6,9 @@ use reminder_cli::daemon::{daemon_status, run_daemon_loop, start_daemon, stop_da
 use reminder_cli::reminder::{Reminder, ReminderSchedule};
 use reminder_cli::storage::Storage;
 use std::str::FromStr;
+use tabled::settings::object::{Columns, Object, Rows};
+use tabled::settings::{Color, Modify, Style, Width};
+use tabled::{Table, Tabled};
 use uuid::Uuid;
 
 #[derive(Parser)]
@@ -167,6 +170,18 @@ fn add_reminder(
     Ok(())
 }
 
+#[derive(Tabled)]
+struct ReminderRow {
+    #[tabled(rename = "ID")]
+    id: String,
+    #[tabled(rename = "Title")]
+    title: String,
+    #[tabled(rename = "Next Trigger")]
+    next_trigger: String,
+    #[tabled(rename = "Type")]
+    schedule_type: String,
+}
+
 fn list_reminders(storage: &Storage) -> Result<()> {
     let mut reminders = storage.load()?;
 
@@ -176,37 +191,82 @@ fn list_reminders(storage: &Storage) -> Result<()> {
     }
 
     // Sort by next trigger time
-    reminders.sort_by(|a, b| {
-        match (&a.next_trigger, &b.next_trigger) {
-            (Some(ta), Some(tb)) => ta.cmp(tb),
-            (Some(_), None) => std::cmp::Ordering::Less,
-            (None, Some(_)) => std::cmp::Ordering::Greater,
-            (None, None) => std::cmp::Ordering::Equal,
-        }
+    reminders.sort_by(|a, b| match (&a.next_trigger, &b.next_trigger) {
+        (Some(ta), Some(tb)) => ta.cmp(tb),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => std::cmp::Ordering::Equal,
     });
 
-    println!("{:<36} {:<20} {:<20} {:<10}", "ID", "Title", "Next Trigger", "Type");
-    println!("{}", "-".repeat(90));
+    // Track which rows are completed (1-indexed, row 0 is header)
+    let completed_rows: Vec<usize> = reminders
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| r.completed)
+        .map(|(i, _)| i + 1)
+        .collect();
 
-    for reminder in reminders {
-        let next_trigger = reminder
-            .next_trigger
-            .map(|t| t.format("%Y-%m-%d %H:%M").to_string())
-            .unwrap_or_else(|| "Completed".to_string());
+    let rows: Vec<ReminderRow> = reminders
+        .iter()
+        .map(|r| {
+            let type_str = match &r.schedule {
+                ReminderSchedule::OneTime(_) => "One-time".to_string(),
+                ReminderSchedule::Cron(_) => "Periodic".to_string(),
+            };
 
-        let schedule_type = match &reminder.schedule {
-            ReminderSchedule::OneTime(_) => "One-time",
-            ReminderSchedule::Cron(_) => "Periodic",
-        };
+            ReminderRow {
+                id: r.id.to_string(),
+                title: r.title.clone(),
+                next_trigger: r
+                    .next_trigger
+                    .map(|t| t.format("%Y-%m-%d %H:%M").to_string())
+                    .unwrap_or_else(|| "Completed".to_string()),
+                schedule_type: type_str,
+            }
+        })
+        .collect();
 
-        println!(
-            "{:<36} {:<20} {:<20} {:<10}",
-            reminder.id,
-            truncate(&reminder.title, 18),
-            next_trigger,
-            schedule_type
+    // Track which rows are active one-time or periodic
+    let onetime_rows: Vec<usize> = reminders
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| !r.completed && matches!(r.schedule, ReminderSchedule::OneTime(_)))
+        .map(|(i, _)| i + 1)
+        .collect();
+
+    let periodic_rows: Vec<usize> = reminders
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| !r.completed && matches!(r.schedule, ReminderSchedule::Cron(_)))
+        .map(|(i, _)| i + 1)
+        .collect();
+
+    let mut table = Table::new(rows);
+    table.with(Style::rounded());
+    table.with(Modify::new(Columns::single(3)).with(Width::increase(10)));
+
+    // Apply gray color to completed rows
+    for row_idx in completed_rows {
+        table.modify(Rows::single(row_idx), Color::FG_BRIGHT_BLACK);
+    }
+
+    // Apply cyan to active one-time rows (Type column only)
+    for row_idx in onetime_rows {
+        table.modify(
+            Rows::single(row_idx).intersect(Columns::single(3)),
+            Color::FG_CYAN,
         );
     }
+
+    // Apply green to active periodic rows (Type column only)
+    for row_idx in periodic_rows {
+        table.modify(
+            Rows::single(row_idx).intersect(Columns::single(3)),
+            Color::FG_GREEN,
+        );
+    }
+
+    println!("{}", table);
 
     Ok(())
 }
@@ -277,12 +337,4 @@ fn edit_reminder(
     }
 
     Ok(())
-}
-
-fn truncate(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else {
-        format!("{}...", &s[..max_len - 3])
-    }
 }
