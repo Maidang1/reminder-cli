@@ -27,6 +27,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Extract version
+        id: version
+        shell: bash
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Update Cargo.toml version
+        shell: bash
+        run: |
+          sed -i.bak 's/^version = ".*"/version = "${{ steps.version.outputs.VERSION }}"/' Cargo.toml
+          rm -f Cargo.toml.bak
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -176,6 +187,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Extract version
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Update Cargo.toml version
+        run: sed -i 's/^version = ".*"/version = "${{ steps.version.outputs.VERSION }}"/' Cargo.toml
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
