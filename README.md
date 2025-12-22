@@ -4,10 +4,18 @@
 
 ## 安装
 
+### homebrew
 ```bash
-cargo build --release
-# 可执行文件位于 ./target/release/reminder
+brew tap Maidang1/tap
+brew install reminder-cli
+
 ```
+
+### cargo
+```bash
+cargo install reminder-cli
+```
+
 
 ## 使用方法
 

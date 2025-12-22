@@ -2,6 +2,11 @@
 name = "reminder-cli"
 version = "0.1.0"
 edition = "2021"
+description = "A CLI reminder tool with cron support and system notifications"
+license = "MIT"
+repository = "https://github.com/Maidang1/reminder-cli"
+keywords = ["cli", "reminder", "cron", "notification"]
+categories = ["command-line-utilities"]
 
 [[bin]]
 name = "reminder"
