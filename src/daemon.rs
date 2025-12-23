@@ -261,7 +261,7 @@ pub fn install_autostart() -> Result<()> {
                     .join("Roaming/Microsoft/Windows/Start Menu/Programs/Startup")
                     .display()
                     .to_string())
-                .unwrap_or_else(|_| "Unknown".to_string())
+                .unwrap_or_else(|| "Unknown".to_string())
         );
     }
 
