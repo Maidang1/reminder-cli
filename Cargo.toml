@@ -22,6 +22,5 @@ notify-rust = "4.10"
 uuid = { version = "1.6", features = ["v4", "serde"] }
 dirs = "5.0"
 anyhow = "1.0"
-thiserror = "1.0"
 tabled = "0.16"
-owo-colors = "4.0"
+fs2 = "0.4"

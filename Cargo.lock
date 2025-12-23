@@ -487,6 +487,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 
 [[package]]
+name = "fs2"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9564fc758e15025b46aa6643b1b77d047d1a56a1aea6e01002ac0c7026876213"
+dependencies = [
+ "libc",
+ "winapi",
+]
+
+[[package]]
 name = "futures-core"
 version = "0.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -801,12 +811,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "owo-colors"
-version = "4.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c6901729fa79e91a0913333229e9ca5dc725089d1c363b2f4b4760709dc4a52"
-
-[[package]]
 name = "papergrid"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -946,12 +950,11 @@ dependencies = [
  "clap",
  "cron",
  "dirs",
+ "fs2",
  "notify-rust",
- "owo-colors",
  "serde",
  "serde_json",
  "tabled",
- "thiserror 1.0.69",
  "uuid",
 ]
 

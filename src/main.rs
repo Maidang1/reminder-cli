@@ -2,7 +2,9 @@ use anyhow::{bail, Result};
 use chrono::{Local, NaiveDateTime};
 use clap::{Parser, Subcommand};
 use cron::Schedule;
-use reminder_cli::daemon::{daemon_status, run_daemon_loop, start_daemon, stop_daemon};
+use reminder_cli::daemon::{
+    daemon_status, install_autostart, run_daemon_loop, start_daemon, stop_daemon,
+};
 use reminder_cli::reminder::{Reminder, ReminderSchedule};
 use reminder_cli::storage::Storage;
 use std::path::PathBuf;
@@ -10,7 +12,6 @@ use std::str::FromStr;
 use tabled::settings::object::{Columns, Object, Rows};
 use tabled::settings::{Color, Modify, Style, Width};
 use tabled::{Table, Tabled};
-use uuid::Uuid;
 
 #[derive(Parser)]
 #[command(name = "reminder")]
@@ -44,16 +45,22 @@ enum Commands {
     /// List all reminders
     List,
 
+    /// Show details of a specific reminder
+    Show {
+        /// ID of the reminder (can use short ID prefix)
+        id: String,
+    },
+
     /// Delete a reminder
     Delete {
-        /// ID of the reminder to delete
+        /// ID of the reminder to delete (can use short ID prefix)
         #[arg(short, long)]
         id: String,
     },
 
     /// Edit an existing reminder
     Edit {
-        /// ID of the reminder to edit
+        /// ID of the reminder to edit (can use short ID prefix)
         #[arg(short, long)]
         id: String,
 
@@ -73,6 +80,9 @@ enum Commands {
         #[arg(short, long)]
         cron: Option<String>,
     },
+
+    /// Clean up completed reminders
+    Clean,
 
     /// Manage the background daemon
     Daemon {
@@ -108,7 +118,10 @@ enum DaemonAction {
     /// Check daemon status
     Status,
     /// Run the daemon (internal use)
+    #[command(hide = true)]
     Run,
+    /// Install auto-start configuration
+    Install,
 }
 
 fn main() -> Result<()> {
@@ -125,6 +138,8 @@ fn main() -> Result<()> {
 
         Commands::List => list_reminders(&storage),
 
+        Commands::Show { id } => show_reminder(&storage, &id),
+
         Commands::Delete { id } => delete_reminder(&storage, &id),
 
         Commands::Edit {
@@ -135,11 +150,14 @@ fn main() -> Result<()> {
             cron,
         } => edit_reminder(&storage, &id, title, description, time, cron),
 
+        Commands::Clean => clean_reminders(&storage),
+
         Commands::Daemon { action } => match action {
             DaemonAction::Start => start_daemon(),
             DaemonAction::Stop => stop_daemon(),
             DaemonAction::Status => daemon_status(),
             DaemonAction::Run => run_daemon_loop(),
+            DaemonAction::Install => install_autostart(),
         },
 
         Commands::Export { output } => export_reminders(&storage, &output),
@@ -156,7 +174,6 @@ fn add_reminder(
     cron: Option<String>,
 ) -> Result<()> {
     let reminder = if let Some(cron_expr) = cron {
-        // Validate cron expression
         if Schedule::from_str(&cron_expr).is_err() {
             bail!(
                 "Invalid cron expression: {}\n\
@@ -167,20 +184,24 @@ fn add_reminder(
         }
         Reminder::new_cron(title, description, cron_expr)?
     } else if let Some(time_str) = time {
-        let naive = NaiveDateTime::parse_from_str(&time_str, "%Y-%m-%d %H:%M")
-            .map_err(|_| anyhow::anyhow!(
+        let naive = NaiveDateTime::parse_from_str(&time_str, "%Y-%m-%d %H:%M").map_err(|_| {
+            anyhow::anyhow!(
                 "Invalid time format: {}\nExpected format: YYYY-MM-DD HH:MM",
                 time_str
-            ))?;
-        let datetime = naive.and_local_timezone(Local).single()
+            )
+        })?;
+        let datetime = naive
+            .and_local_timezone(Local)
+            .single()
             .ok_or_else(|| anyhow::anyhow!("Invalid local time"))?;
         Reminder::new_one_time(title, description, datetime)
     } else {
         bail!("Either --time or --cron must be specified");
     };
 
+    let short_id = &reminder.id.to_string()[..8];
     println!("✓ Reminder added successfully!");
-    println!("  ID: {}", reminder.id);
+    println!("  ID: {} (short: {})", reminder.id, short_id);
     println!("  Title: {}", reminder.title);
     if let Some(desc) = &reminder.description {
         println!("  Description: {}", desc);
@@ -195,7 +216,7 @@ fn add_reminder(
 
 #[derive(Tabled)]
 struct ReminderRow {
-    #[tabled(rename = "ID")]
+    #[tabled(rename = "ID (short)")]
     id: String,
     #[tabled(rename = "Title")]
     title: String,
@@ -213,7 +234,6 @@ fn list_reminders(storage: &Storage) -> Result<()> {
         return Ok(());
     }
 
-    // Sort by next trigger time
     reminders.sort_by(|a, b| match (&a.next_trigger, &b.next_trigger) {
         (Some(ta), Some(tb)) => ta.cmp(tb),
         (Some(_), None) => std::cmp::Ordering::Less,
@@ -221,7 +241,6 @@ fn list_reminders(storage: &Storage) -> Result<()> {
         (None, None) => std::cmp::Ordering::Equal,
     });
 
-    // Track which rows are completed (1-indexed, row 0 is header)
     let completed_rows: Vec<usize> = reminders
         .iter()
         .enumerate()
@@ -238,8 +257,8 @@ fn list_reminders(storage: &Storage) -> Result<()> {
             };
 
             ReminderRow {
-                id: r.id.to_string(),
-                title: r.title.clone(),
+                id: r.id.to_string()[..8].to_string(),
+                title: truncate(&r.title, 30),
                 next_trigger: r
                     .next_trigger
                     .map(|t| t.format("%Y-%m-%d %H:%M").to_string())
@@ -249,7 +268,6 @@ fn list_reminders(storage: &Storage) -> Result<()> {
         })
         .collect();
 
-    // Track which rows are active one-time or periodic
     let onetime_rows: Vec<usize> = reminders
         .iter()
         .enumerate()
@@ -268,12 +286,10 @@ fn list_reminders(storage: &Storage) -> Result<()> {
     table.with(Style::rounded());
     table.with(Modify::new(Columns::single(3)).with(Width::increase(10)));
 
-    // Apply gray color to completed rows
     for row_idx in completed_rows {
         table.modify(Rows::single(row_idx), Color::FG_BRIGHT_BLACK);
     }
 
-    // Apply cyan to active one-time rows (Type column only)
     for row_idx in onetime_rows {
         table.modify(
             Rows::single(row_idx).intersect(Columns::single(3)),
@@ -281,7 +297,6 @@ fn list_reminders(storage: &Storage) -> Result<()> {
         );
     }
 
-    // Apply green to active periodic rows (Type column only)
     for row_idx in periodic_rows {
         table.modify(
             Rows::single(row_idx).intersect(Columns::single(3)),
@@ -294,14 +309,53 @@ fn list_reminders(storage: &Storage) -> Result<()> {
     Ok(())
 }
 
-fn delete_reminder(storage: &Storage, id: &str) -> Result<()> {
-    let uuid = Uuid::parse_str(id)
-        .map_err(|_| anyhow::anyhow!("Invalid reminder ID format"))?;
+fn show_reminder(storage: &Storage, id: &str) -> Result<()> {
+    let reminder = storage
+        .find_by_short_id(id)?
+        .ok_or_else(|| anyhow::anyhow!("Reminder not found with ID: {}", id))?;
 
-    if storage.delete(uuid)? {
-        println!("✓ Reminder deleted successfully");
-    } else {
-        println!("✗ Reminder not found with ID: {}", id);
+    println!("ID:          {}", reminder.id);
+    println!("Title:       {}", reminder.title);
+    if let Some(desc) = &reminder.description {
+        println!("Description: {}", desc);
+    }
+    println!(
+        "Type:        {}",
+        match &reminder.schedule {
+            ReminderSchedule::OneTime(_) => "One-time",
+            ReminderSchedule::Cron(expr) => {
+                println!("Cron:        {}", expr);
+                "Periodic"
+            }
+        }
+    );
+    println!(
+        "Created:     {}",
+        reminder.created_at.format("%Y-%m-%d %H:%M:%S")
+    );
+    if let Some(next) = reminder.next_trigger {
+        println!("Next:        {}", next.format("%Y-%m-%d %H:%M:%S"));
+    }
+    println!(
+        "Status:      {}",
+        if reminder.completed {
+            "Completed"
+        } else {
+            "Active"
+        }
+    );
+
+    Ok(())
+}
+
+fn delete_reminder(storage: &Storage, id: &str) -> Result<()> {
+    match storage.delete_by_short_id(id)? {
+        Some(uuid) => {
+            println!("✓ Reminder deleted successfully (ID: {})", uuid);
+        }
+        None => {
+            println!("✗ Reminder not found with ID: {}", id);
+        }
     }
 
     Ok(())
@@ -315,8 +369,11 @@ fn edit_reminder(
     time: Option<String>,
     cron: Option<String>,
 ) -> Result<()> {
-    let uuid = Uuid::parse_str(id)
-        .map_err(|_| anyhow::anyhow!("Invalid reminder ID format"))?;
+    let reminder = storage
+        .find_by_short_id(id)?
+        .ok_or_else(|| anyhow::anyhow!("Reminder not found with ID: {}", id))?;
+
+    let uuid = reminder.id;
 
     let updated = storage.update(uuid, |reminder| {
         if let Some(new_title) = title {
@@ -355,8 +412,6 @@ fn edit_reminder(
                 println!("  Next trigger: {}", next.format("%Y-%m-%d %H:%M:%S"));
             }
         }
-    } else {
-        println!("✗ Reminder not found with ID: {}", id);
     }
 
     Ok(())
@@ -382,4 +437,24 @@ fn import_reminders(storage: &Storage, input: &PathBuf, overwrite: bool) -> Resu
     }
     
     Ok(())
+}
+
+fn clean_reminders(storage: &Storage) -> Result<()> {
+    let removed = storage.clean_completed()?;
+
+    if removed > 0 {
+        println!("✓ Cleaned {} completed reminder(s)", removed);
+    } else {
+        println!("No completed reminders to clean");
+    }
+
+    Ok(())
+}
+
+fn truncate(s: &str, max_len: usize) -> String {
+    if s.chars().count() <= max_len {
+        s.to_string()
+    } else {
+        format!("{}...", s.chars().take(max_len - 3).collect::<String>())
+    }
 }
