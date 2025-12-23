@@ -55,13 +55,13 @@ jobs:
         shell: bash
         run: |
           cd target/${{ matrix.target }}/release
-          tar -czvf ../../../reminder-cli-${{ matrix.target }}.tar.gz reminder
+          tar -czvf ../../../reminder-cli-${{ matrix.target }}.tar.gz reminder rem
 
       - name: Package (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          Compress-Archive -Path target/${{ matrix.target }}/release/reminder.exe -DestinationPath reminder-cli-${{ matrix.target }}.zip
+          Compress-Archive -Path target/${{ matrix.target }}/release/reminder.exe,target/${{ matrix.target }}/release/rem.exe -DestinationPath reminder-cli-${{ matrix.target }}.zip
 
       - name: Upload artifact (Unix)
         if: matrix.os != 'windows-latest'
@@ -164,10 +164,12 @@ jobs:
 
             def install
               bin.install "reminder"
+              bin.install "rem"
             end
 
             test do
               system "#{bin}/reminder", "--help"
+              system "#{bin}/rem", "--help"
             end
           end
           EOF
