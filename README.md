@@ -17,12 +17,6 @@ brew install reminder-cli
 cargo install reminder-cli
 ```
 
-### Winget (Windows)
-
-```powershell
-winget install Maidang1.reminder-cli
-```
-
 ### 从源码构建
 
 ```bash
@@ -72,17 +66,8 @@ rem list                  # 列出所有活跃提醒
 rem list --all            # 包括已完成的
 rem list --tag work       # 按标签筛选
 ```
+<img width="950" height="280" alt="image" src="https://github.com/user-attachments/assets/0eaa8569-1ee7-41ab-9dc0-d74cefda65b4" />
 
-输出示例：
-```
-╭──────────┬──────────┬──────────────────┬────────────┬────────╮
-│ ID       │ Title    │ Next Trigger     │ Type       │ Status │
-├──────────┼──────────┼──────────────────┼────────────┼────────┤
-│ 1946e28d │ 每日站会 │ 2025-12-23 09:00 │ Periodic   │ Active │
-│ f72bd9dc │ 开会     │ 2025-12-25 10:00 │ One-time   │ Active │
-│ 2f61082f │ 休息     │ 2025-12-25 14:00 │ One-time   │ Paused │
-╰──────────┴──────────┴──────────────────┴────────────┴────────╯
-```
 
 ### 查看提醒详情
 
