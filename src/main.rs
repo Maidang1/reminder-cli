@@ -1,12 +1,15 @@
 use anyhow::{bail, Result};
-use chrono::{Local, NaiveDateTime};
+use chrono::Local;
 use clap::{Parser, Subcommand};
 use cron::Schedule;
+use reminder_cli::cron_parser::parse_cron;
 use reminder_cli::daemon::{
     daemon_status, install_autostart, run_daemon_loop, start_daemon, stop_daemon,
 };
 use reminder_cli::reminder::{Reminder, ReminderSchedule};
 use reminder_cli::storage::Storage;
+use reminder_cli::time_parser::parse_time;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::str::FromStr;
 use tabled::settings::object::{Columns, Object, Rows};
@@ -33,17 +36,29 @@ enum Commands {
         #[arg(short, long)]
         description: Option<String>,
 
-        /// Time for one-time reminder (format: "YYYY-MM-DD HH:MM")
+        /// Time for reminder (supports: "2025-12-25 10:00", "30m", "2h", "tomorrow 9am")
         #[arg(short = 'T', long, conflicts_with = "cron")]
         time: Option<String>,
 
-        /// Cron expression for periodic reminder (e.g., "0 0 9 * * *" for daily at 9am)
+        /// Cron expression or English (e.g., "0 0 9 * * *" or "every day at 9am")
         #[arg(short, long, conflicts_with = "time")]
         cron: Option<String>,
+
+        /// Tags for categorization (comma-separated)
+        #[arg(long, value_delimiter = ',')]
+        tags: Option<Vec<String>>,
     },
 
     /// List all reminders
-    List,
+    List {
+        /// Filter by tag
+        #[arg(long)]
+        tag: Option<String>,
+
+        /// Show all including paused
+        #[arg(short, long)]
+        all: bool,
+    },
 
     /// Show details of a specific reminder
     Show {
@@ -79,10 +94,33 @@ enum Commands {
         /// New cron expression (optional)
         #[arg(short, long)]
         cron: Option<String>,
+
+        /// Add tags (comma-separated)
+        #[arg(long, value_delimiter = ',')]
+        add_tags: Option<Vec<String>>,
+
+        /// Remove tags (comma-separated)
+        #[arg(long, value_delimiter = ',')]
+        remove_tags: Option<Vec<String>>,
+    },
+
+    /// Pause a reminder
+    Pause {
+        /// ID of the reminder to pause
+        id: String,
+    },
+
+    /// Resume a paused reminder
+    Resume {
+        /// ID of the reminder to resume
+        id: String,
     },
 
     /// Clean up completed reminders
     Clean,
+
+    /// List all tags
+    Tags,
 
     /// Manage the background daemon
     Daemon {
@@ -134,9 +172,10 @@ fn main() -> Result<()> {
             description,
             time,
             cron,
-        } => add_reminder(&storage, title, description, time, cron),
+            tags,
+        } => add_reminder(&storage, title, description, time, cron, tags),
 
-        Commands::List => list_reminders(&storage),
+        Commands::List { tag, all } => list_reminders(&storage, tag, all),
 
         Commands::Show { id } => show_reminder(&storage, &id),
 
@@ -148,9 +187,26 @@ fn main() -> Result<()> {
             description,
             time,
             cron,
-        } => edit_reminder(&storage, &id, title, description, time, cron),
+            add_tags,
+            remove_tags,
+        } => edit_reminder(
+            &storage,
+            &id,
+            title,
+            description,
+            time,
+            cron,
+            add_tags,
+            remove_tags,
+        ),
+
+        Commands::Pause { id } => pause_reminder(&storage, &id),
+
+        Commands::Resume { id } => resume_reminder(&storage, &id),
 
         Commands::Clean => clean_reminders(&storage),
+
+        Commands::Tags => list_tags(&storage),
 
         Commands::Daemon { action } => match action {
             DaemonAction::Start => start_daemon(),
@@ -172,29 +228,16 @@ fn add_reminder(
     description: Option<String>,
     time: Option<String>,
     cron: Option<String>,
+    tags: Option<Vec<String>>,
 ) -> Result<()> {
-    let reminder = if let Some(cron_expr) = cron {
-        if Schedule::from_str(&cron_expr).is_err() {
-            bail!(
-                "Invalid cron expression: {}\n\
-                Valid format: 'sec min hour day month weekday'\n\
-                Example: '0 0 9 * * *' (daily at 9:00 AM)",
-                cron_expr
-            );
-        }
-        Reminder::new_cron(title, description, cron_expr)?
+    let tags_set: HashSet<String> = tags.unwrap_or_default().into_iter().collect();
+
+    let reminder = if let Some(cron_input) = cron {
+        let cron_expr = parse_cron(&cron_input)?;
+        Reminder::new_cron(title, description, cron_expr, tags_set)?
     } else if let Some(time_str) = time {
-        let naive = NaiveDateTime::parse_from_str(&time_str, "%Y-%m-%d %H:%M").map_err(|_| {
-            anyhow::anyhow!(
-                "Invalid time format: {}\nExpected format: YYYY-MM-DD HH:MM",
-                time_str
-            )
-        })?;
-        let datetime = naive
-            .and_local_timezone(Local)
-            .single()
-            .ok_or_else(|| anyhow::anyhow!("Invalid local time"))?;
-        Reminder::new_one_time(title, description, datetime)
+        let datetime = parse_time(&time_str)?;
+        Reminder::new_one_time(title, description, datetime, tags_set)
     } else {
         bail!("Either --time or --cron must be specified");
     };
@@ -206,6 +249,9 @@ fn add_reminder(
     if let Some(desc) = &reminder.description {
         println!("  Description: {}", desc);
     }
+    if !reminder.tags.is_empty() {
+        println!("  Tags: {}", reminder.tags.iter().cloned().collect::<Vec<_>>().join(", "));
+    }
     if let Some(next) = reminder.next_trigger {
         println!("  Next trigger: {}", next.format("%Y-%m-%d %H:%M:%S"));
     }
@@ -216,7 +262,7 @@ fn add_reminder(
 
 #[derive(Tabled)]
 struct ReminderRow {
-    #[tabled(rename = "ID (short)")]
+    #[tabled(rename = "ID")]
     id: String,
     #[tabled(rename = "Title")]
     title: String,
@@ -224,13 +270,23 @@ struct ReminderRow {
     next_trigger: String,
     #[tabled(rename = "Type")]
     schedule_type: String,
+    #[tabled(rename = "Status")]
+    status: String,
 }
 
-fn list_reminders(storage: &Storage) -> Result<()> {
-    let mut reminders = storage.load()?;
+fn list_reminders(storage: &Storage, tag_filter: Option<String>, show_all: bool) -> Result<()> {
+    let mut reminders = if let Some(tag) = tag_filter {
+        storage.filter_by_tag(&tag)?
+    } else {
+        storage.load()?
+    };
+
+    if !show_all {
+        reminders.retain(|r| !r.completed);
+    }
 
     if reminders.is_empty() {
-        println!("No reminders scheduled.");
+        println!("No reminders found.");
         return Ok(());
     }
 
@@ -248,6 +304,13 @@ fn list_reminders(storage: &Storage) -> Result<()> {
         .map(|(i, _)| i + 1)
         .collect();
 
+    let paused_rows: Vec<usize> = reminders
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| r.paused && !r.completed)
+        .map(|(i, _)| i + 1)
+        .collect();
+
     let rows: Vec<ReminderRow> = reminders
         .iter()
         .map(|r| {
@@ -258,12 +321,13 @@ fn list_reminders(storage: &Storage) -> Result<()> {
 
             ReminderRow {
                 id: r.id.to_string()[..8].to_string(),
-                title: truncate(&r.title, 30),
+                title: truncate(&r.title, 25),
                 next_trigger: r
                     .next_trigger
                     .map(|t| t.format("%Y-%m-%d %H:%M").to_string())
-                    .unwrap_or_else(|| "Completed".to_string()),
+                    .unwrap_or_else(|| "-".to_string()),
                 schedule_type: type_str,
+                status: r.status().to_string(),
             }
         })
         .collect();
@@ -271,14 +335,18 @@ fn list_reminders(storage: &Storage) -> Result<()> {
     let onetime_rows: Vec<usize> = reminders
         .iter()
         .enumerate()
-        .filter(|(_, r)| !r.completed && matches!(r.schedule, ReminderSchedule::OneTime(_)))
+        .filter(|(_, r)| {
+            !r.completed && !r.paused && matches!(r.schedule, ReminderSchedule::OneTime(_))
+        })
         .map(|(i, _)| i + 1)
         .collect();
 
     let periodic_rows: Vec<usize> = reminders
         .iter()
         .enumerate()
-        .filter(|(_, r)| !r.completed && matches!(r.schedule, ReminderSchedule::Cron(_)))
+        .filter(|(_, r)| {
+            !r.completed && !r.paused && matches!(r.schedule, ReminderSchedule::Cron(_))
+        })
         .map(|(i, _)| i + 1)
         .collect();
 
@@ -286,10 +354,17 @@ fn list_reminders(storage: &Storage) -> Result<()> {
     table.with(Style::rounded());
     table.with(Modify::new(Columns::single(3)).with(Width::increase(10)));
 
+    // Gray for completed
     for row_idx in completed_rows {
         table.modify(Rows::single(row_idx), Color::FG_BRIGHT_BLACK);
     }
 
+    // Yellow for paused
+    for row_idx in paused_rows {
+        table.modify(Rows::single(row_idx), Color::FG_YELLOW);
+    }
+
+    // Cyan for active one-time
     for row_idx in onetime_rows {
         table.modify(
             Rows::single(row_idx).intersect(Columns::single(3)),
@@ -297,6 +372,7 @@ fn list_reminders(storage: &Storage) -> Result<()> {
         );
     }
 
+    // Green for active periodic
     for row_idx in periodic_rows {
         table.modify(
             Rows::single(row_idx).intersect(Columns::single(3)),
@@ -319,6 +395,12 @@ fn show_reminder(storage: &Storage, id: &str) -> Result<()> {
     if let Some(desc) = &reminder.description {
         println!("Description: {}", desc);
     }
+    if !reminder.tags.is_empty() {
+        println!(
+            "Tags:        {}",
+            reminder.tags.iter().cloned().collect::<Vec<_>>().join(", ")
+        );
+    }
     println!(
         "Type:        {}",
         match &reminder.schedule {
@@ -336,14 +418,7 @@ fn show_reminder(storage: &Storage, id: &str) -> Result<()> {
     if let Some(next) = reminder.next_trigger {
         println!("Next:        {}", next.format("%Y-%m-%d %H:%M:%S"));
     }
-    println!(
-        "Status:      {}",
-        if reminder.completed {
-            "Completed"
-        } else {
-            "Active"
-        }
-    );
+    println!("Status:      {}", reminder.status());
 
     Ok(())
 }
@@ -368,6 +443,8 @@ fn edit_reminder(
     description: Option<String>,
     time: Option<String>,
     cron: Option<String>,
+    add_tags: Option<Vec<String>>,
+    remove_tags: Option<Vec<String>>,
 ) -> Result<()> {
     let reminder = storage
         .find_by_short_id(id)?
@@ -383,19 +460,29 @@ fn edit_reminder(
             reminder.description = Some(new_desc);
         }
         if let Some(time_str) = time {
-            if let Ok(naive) = NaiveDateTime::parse_from_str(&time_str, "%Y-%m-%d %H:%M") {
-                if let Some(datetime) = naive.and_local_timezone(Local).single() {
-                    reminder.schedule = ReminderSchedule::OneTime(datetime);
-                    reminder.next_trigger = Some(datetime);
+            if let Ok(datetime) = parse_time(&time_str) {
+                reminder.schedule = ReminderSchedule::OneTime(datetime);
+                reminder.next_trigger = Some(datetime);
+                reminder.completed = false;
+            }
+        }
+        if let Some(cron_input) = cron {
+            if let Ok(cron_expr) = parse_cron(&cron_input) {
+                if let Ok(schedule) = Schedule::from_str(&cron_expr) {
+                    reminder.schedule = ReminderSchedule::Cron(cron_expr);
+                    reminder.next_trigger = schedule.upcoming(Local).next();
                     reminder.completed = false;
                 }
             }
         }
-        if let Some(cron_expr) = cron {
-            if let Ok(schedule) = Schedule::from_str(&cron_expr) {
-                reminder.schedule = ReminderSchedule::Cron(cron_expr);
-                reminder.next_trigger = schedule.upcoming(Local).next();
-                reminder.completed = false;
+        if let Some(tags) = add_tags {
+            for tag in tags {
+                reminder.tags.insert(tag);
+            }
+        }
+        if let Some(tags) = remove_tags {
+            for tag in tags {
+                reminder.tags.remove(&tag);
             }
         }
     })?;
@@ -408,10 +495,57 @@ fn edit_reminder(
             if let Some(desc) = &reminder.description {
                 println!("  Description: {}", desc);
             }
+            if !reminder.tags.is_empty() {
+                println!(
+                    "  Tags: {}",
+                    reminder.tags.iter().cloned().collect::<Vec<_>>().join(", ")
+                );
+            }
             if let Some(next) = reminder.next_trigger {
                 println!("  Next trigger: {}", next.format("%Y-%m-%d %H:%M:%S"));
             }
         }
+    }
+
+    Ok(())
+}
+
+fn pause_reminder(storage: &Storage, id: &str) -> Result<()> {
+    match storage.pause_by_short_id(id)? {
+        Some(uuid) => {
+            println!("✓ Reminder paused (ID: {})", &uuid.to_string()[..8]);
+        }
+        None => {
+            println!("✗ Reminder not found with ID: {}", id);
+        }
+    }
+    Ok(())
+}
+
+fn resume_reminder(storage: &Storage, id: &str) -> Result<()> {
+    match storage.resume_by_short_id(id)? {
+        Some(uuid) => {
+            println!("✓ Reminder resumed (ID: {})", &uuid.to_string()[..8]);
+        }
+        None => {
+            println!("✗ Reminder not found with ID: {}", id);
+        }
+    }
+    Ok(())
+}
+
+fn list_tags(storage: &Storage) -> Result<()> {
+    let tags = storage.get_all_tags()?;
+
+    if tags.is_empty() {
+        println!("No tags found.");
+        return Ok(());
+    }
+
+    println!("Tags:");
+    for tag in tags {
+        let count = storage.filter_by_tag(&tag)?.len();
+        println!("  {} ({})", tag, count);
     }
 
     Ok(())
@@ -429,13 +563,16 @@ fn import_reminders(storage: &Storage, input: &PathBuf, overwrite: bool) -> Resu
     }
 
     let (imported, skipped) = storage.import_from_file(input, overwrite)?;
-    
+
     println!("✓ Import completed:");
     println!("  Imported: {} reminder(s)", imported);
     if skipped > 0 {
-        println!("  Skipped: {} reminder(s) (duplicate IDs, use -f to overwrite)", skipped);
+        println!(
+            "  Skipped: {} reminder(s) (duplicate IDs, use -f to overwrite)",
+            skipped
+        );
     }
-    
+
     Ok(())
 }
 

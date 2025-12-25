@@ -186,6 +186,60 @@ impl Storage {
         Ok(data_dir.join("daemon.log"))
     }
 
+    pub fn heartbeat_file_path() -> Result<PathBuf> {
+        let data_dir = dirs::data_local_dir()
+            .context("Failed to get local data directory")?
+            .join("reminder-cli");
+
+        fs::create_dir_all(&data_dir)?;
+        Ok(data_dir.join("daemon.heartbeat"))
+    }
+
+    /// Filter reminders by tag
+    pub fn filter_by_tag(&self, tag: &str) -> Result<Vec<Reminder>> {
+        let reminders = self.load()?;
+        Ok(reminders
+            .into_iter()
+            .filter(|r| r.tags.contains(tag))
+            .collect())
+    }
+
+    /// Get all unique tags
+    pub fn get_all_tags(&self) -> Result<Vec<String>> {
+        let reminders = self.load()?;
+        let mut tags: Vec<String> = reminders
+            .iter()
+            .flat_map(|r| r.tags.iter().cloned())
+            .collect();
+        tags.sort();
+        tags.dedup();
+        Ok(tags)
+    }
+
+    /// Pause reminder by short ID
+    pub fn pause_by_short_id(&self, short_id: &str) -> Result<Option<Uuid>> {
+        let reminder = self.find_by_short_id(short_id)?;
+        if let Some(r) = reminder {
+            let id = r.id;
+            self.update(id, |rem| rem.pause())?;
+            Ok(Some(id))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Resume reminder by short ID
+    pub fn resume_by_short_id(&self, short_id: &str) -> Result<Option<Uuid>> {
+        let reminder = self.find_by_short_id(short_id)?;
+        if let Some(r) = reminder {
+            let id = r.id;
+            self.update(id, |rem| rem.resume())?;
+            Ok(Some(id))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Export all reminders to a JSON file
     pub fn export_to_file(&self, path: &Path) -> Result<usize> {
         let reminders = self.load()?;

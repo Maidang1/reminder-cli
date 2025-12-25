@@ -9,6 +9,8 @@ use std::thread;
 use std::time::Duration;
 
 const POLL_INTERVAL_SECS: u64 = 10;
+const HEARTBEAT_INTERVAL_SECS: u64 = 30;
+const HEARTBEAT_TIMEOUT_SECS: u64 = 120;
 
 pub fn start_daemon() -> Result<()> {
     let pid_file = Storage::pid_file_path()?;
@@ -65,10 +67,37 @@ pub fn stop_daemon() -> Result<()> {
 }
 
 pub fn daemon_status() -> Result<()> {
-    if is_daemon_running()? {
+    let running = is_daemon_running()?;
+    let healthy = is_daemon_healthy()?;
+
+    if running {
         let pid_file = Storage::pid_file_path()?;
         let pid = fs::read_to_string(&pid_file)?;
         println!("Daemon is running (PID: {})", pid.trim());
+
+        if healthy {
+            println!("Health: OK (heartbeat active)");
+        } else {
+            println!("Health: WARNING (heartbeat stale - daemon may be stuck)");
+        }
+
+        // Show last heartbeat time
+        if let Ok(heartbeat_path) = Storage::heartbeat_file_path() {
+            if heartbeat_path.exists() {
+                if let Ok(content) = fs::read_to_string(&heartbeat_path) {
+                    if let Ok(timestamp) = content.trim().parse::<i64>() {
+                        let dt = chrono::DateTime::from_timestamp(timestamp, 0)
+                            .map(|t| t.with_timezone(&Local));
+                        if let Some(dt) = dt {
+                            println!(
+                                "Last heartbeat: {}",
+                                dt.format("%Y-%m-%d %H:%M:%S")
+                            );
+                        }
+                    }
+                }
+            }
+        }
     } else {
         println!("Daemon is not running");
     }
@@ -134,9 +163,40 @@ fn log_daemon(message: &str) {
     }
 }
 
+fn write_heartbeat() {
+    if let Ok(heartbeat_path) = Storage::heartbeat_file_path() {
+        let timestamp = Local::now().timestamp().to_string();
+        let _ = fs::write(heartbeat_path, timestamp);
+    }
+}
+
+fn check_heartbeat() -> Result<bool> {
+    let heartbeat_path = Storage::heartbeat_file_path()?;
+
+    if !heartbeat_path.exists() {
+        return Ok(false);
+    }
+
+    let content = fs::read_to_string(&heartbeat_path)?;
+    let timestamp: i64 = content.trim().parse().unwrap_or(0);
+    let now = Local::now().timestamp();
+
+    Ok((now - timestamp) < HEARTBEAT_TIMEOUT_SECS as i64)
+}
+
+pub fn is_daemon_healthy() -> Result<bool> {
+    if !is_daemon_running()? {
+        return Ok(false);
+    }
+    check_heartbeat()
+}
+
 pub fn run_daemon_loop() -> Result<()> {
     let storage = Storage::new()?;
     log_daemon("Daemon started");
+    write_heartbeat();
+
+    let mut heartbeat_counter = 0u64;
 
     loop {
         match storage.load() {
@@ -164,6 +224,13 @@ pub fn run_daemon_loop() -> Result<()> {
             Err(e) => {
                 log_daemon(&format!("Failed to load reminders: {}", e));
             }
+        }
+
+        // Write heartbeat periodically
+        heartbeat_counter += POLL_INTERVAL_SECS;
+        if heartbeat_counter >= HEARTBEAT_INTERVAL_SECS {
+            write_heartbeat();
+            heartbeat_counter = 0;
         }
 
         thread::sleep(Duration::from_secs(POLL_INTERVAL_SECS));
