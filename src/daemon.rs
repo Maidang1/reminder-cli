@@ -1,9 +1,9 @@
 use crate::notification::send_notification;
 use crate::storage::Storage;
+use crate::{log_debug, log_error, log_info};
 use anyhow::{Context, Result};
 use chrono::Local;
-use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::fs;
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
@@ -154,14 +154,7 @@ pub fn is_daemon_running() -> Result<bool> {
     }
 }
 
-fn log_daemon(message: &str) {
-    if let Ok(log_path) = Storage::log_file_path() {
-        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(log_path) {
-            let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S");
-            let _ = writeln!(file, "[{}] {}", timestamp, message);
-        }
-    }
-}
+
 
 fn write_heartbeat() {
     if let Ok(heartbeat_path) = Storage::heartbeat_file_path() {
@@ -193,7 +186,7 @@ pub fn is_daemon_healthy() -> Result<bool> {
 
 pub fn run_daemon_loop() -> Result<()> {
     let storage = Storage::new()?;
-    log_daemon("Daemon started");
+    log_info!("Daemon started");
     write_heartbeat();
 
     let mut heartbeat_counter = 0u64;
@@ -205,10 +198,10 @@ pub fn run_daemon_loop() -> Result<()> {
 
                 for reminder in reminders.iter_mut() {
                     if reminder.is_due() {
-                        log_daemon(&format!("Triggering reminder: {}", reminder.title));
+                        log_info!("Triggering reminder: {}", reminder.title);
 
                         if let Err(e) = send_notification(reminder) {
-                            log_daemon(&format!("Failed to send notification: {}", e));
+                            log_error!("Failed to send notification: {}", e);
                         }
                         reminder.calculate_next_trigger();
                         updated = true;
@@ -217,12 +210,12 @@ pub fn run_daemon_loop() -> Result<()> {
 
                 if updated {
                     if let Err(e) = storage.save(&reminders) {
-                        log_daemon(&format!("Failed to save reminders: {}", e));
+                        log_error!("Failed to save reminders: {}", e);
                     }
                 }
             }
             Err(e) => {
-                log_daemon(&format!("Failed to load reminders: {}", e));
+                log_error!("Failed to load reminders: {}", e);
             }
         }
 
@@ -230,6 +223,7 @@ pub fn run_daemon_loop() -> Result<()> {
         heartbeat_counter += POLL_INTERVAL_SECS;
         if heartbeat_counter >= HEARTBEAT_INTERVAL_SECS {
             write_heartbeat();
+            log_debug!("Heartbeat written");
             heartbeat_counter = 0;
         }
 

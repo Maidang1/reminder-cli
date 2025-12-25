@@ -6,9 +6,11 @@ use reminder_cli::cron_parser::parse_cron;
 use reminder_cli::daemon::{
     daemon_status, install_autostart, run_daemon_loop, start_daemon, stop_daemon,
 };
+use reminder_cli::logger::get_logger;
 use reminder_cli::reminder::{Reminder, ReminderSchedule};
 use reminder_cli::storage::Storage;
 use reminder_cli::time_parser::parse_time;
+use reminder_cli::{log_info, log_warn};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -145,6 +147,12 @@ enum Commands {
         #[arg(short = 'f', long, default_value = "false")]
         overwrite: bool,
     },
+
+    /// View and manage logs
+    Logs {
+        #[command(subcommand)]
+        action: LogsAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -160,6 +168,20 @@ enum DaemonAction {
     Run,
     /// Install auto-start configuration
     Install,
+}
+
+#[derive(Subcommand)]
+enum LogsAction {
+    /// Show recent log entries
+    Show {
+        /// Number of lines to show (default: 50)
+        #[arg(short, long, default_value = "50")]
+        lines: usize,
+    },
+    /// Show log file path and size
+    Info,
+    /// Clear all logs
+    Clear,
 }
 
 fn main() -> Result<()> {
@@ -219,6 +241,12 @@ fn main() -> Result<()> {
         Commands::Export { output } => export_reminders(&storage, &output),
 
         Commands::Import { input, overwrite } => import_reminders(&storage, &input, overwrite),
+
+        Commands::Logs { action } => match action {
+            LogsAction::Show { lines } => show_logs(lines),
+            LogsAction::Info => logs_info(),
+            LogsAction::Clear => clear_logs(),
+        },
     }
 }
 
@@ -243,6 +271,8 @@ fn add_reminder(
     };
 
     let short_id = &reminder.id.to_string()[..8];
+    log_info!("Added reminder: {} ({})", reminder.title, short_id);
+
     println!("✓ Reminder added successfully!");
     println!("  ID: {} (short: {})", reminder.id, short_id);
     println!("  Title: {}", reminder.title);
@@ -426,9 +456,11 @@ fn show_reminder(storage: &Storage, id: &str) -> Result<()> {
 fn delete_reminder(storage: &Storage, id: &str) -> Result<()> {
     match storage.delete_by_short_id(id)? {
         Some(uuid) => {
+            log_info!("Deleted reminder: {}", uuid);
             println!("✓ Reminder deleted successfully (ID: {})", uuid);
         }
         None => {
+            log_warn!("Delete failed: reminder not found with ID: {}", id);
             println!("✗ Reminder not found with ID: {}", id);
         }
     }
@@ -488,6 +520,7 @@ fn edit_reminder(
     })?;
 
     if updated {
+        log_info!("Updated reminder: {}", uuid);
         println!("✓ Reminder updated successfully");
         if let Some(reminder) = storage.get(uuid)? {
             println!("  ID: {}", reminder.id);
@@ -513,6 +546,7 @@ fn edit_reminder(
 fn pause_reminder(storage: &Storage, id: &str) -> Result<()> {
     match storage.pause_by_short_id(id)? {
         Some(uuid) => {
+            log_info!("Paused reminder: {}", &uuid.to_string()[..8]);
             println!("✓ Reminder paused (ID: {})", &uuid.to_string()[..8]);
         }
         None => {
@@ -525,6 +559,7 @@ fn pause_reminder(storage: &Storage, id: &str) -> Result<()> {
 fn resume_reminder(storage: &Storage, id: &str) -> Result<()> {
     match storage.resume_by_short_id(id)? {
         Some(uuid) => {
+            log_info!("Resumed reminder: {}", &uuid.to_string()[..8]);
             println!("✓ Reminder resumed (ID: {})", &uuid.to_string()[..8]);
         }
         None => {
@@ -580,6 +615,7 @@ fn clean_reminders(storage: &Storage) -> Result<()> {
     let removed = storage.clean_completed()?;
 
     if removed > 0 {
+        log_info!("Cleaned {} completed reminder(s)", removed);
         println!("✓ Cleaned {} completed reminder(s)", removed);
     } else {
         println!("No completed reminders to clean");
@@ -594,4 +630,40 @@ fn truncate(s: &str, max_len: usize) -> String {
     } else {
         format!("{}...", s.chars().take(max_len - 3).collect::<String>())
     }
+}
+
+fn show_logs(lines: usize) -> Result<()> {
+    let logger = get_logger();
+    let log_lines = logger.tail(lines)?;
+
+    if log_lines.is_empty() {
+        println!("No logs found.");
+        return Ok(());
+    }
+
+    for line in log_lines {
+        println!("{}", line);
+    }
+
+    Ok(())
+}
+
+fn logs_info() -> Result<()> {
+    let logger = get_logger();
+    let size = logger.size()?;
+
+    println!("Log file: {}", logger.path().display());
+    println!(
+        "Size: {:.2} KB / 1024 KB",
+        size as f64 / 1024.0
+    );
+
+    Ok(())
+}
+
+fn clear_logs() -> Result<()> {
+    let logger = get_logger();
+    logger.clear()?;
+    println!("✓ Logs cleared");
+    Ok(())
 }

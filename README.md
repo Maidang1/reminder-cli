@@ -128,6 +128,17 @@ rem import -i backup.json    # 导入
 rem import -i backup.json -f # 导入并覆盖重复
 ```
 
+### 日志管理
+
+```bash
+rem logs show           # 显示最近 50 条日志
+rem logs show -l 100    # 显示最近 100 条日志
+rem logs info           # 显示日志文件路径和大小
+rem logs clear          # 清除所有日志
+```
+
+日志文件自动轮转，最大 1MB。超过后旧日志会被归档为 `.old` 文件。
+
 ## 时间格式
 
 ### 一次性提醒 (-T)
