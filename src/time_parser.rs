@@ -43,7 +43,9 @@ fn parse_absolute(input: &str) -> Result<DateTime<Local>> {
 }
 
 fn parse_relative(input: &str) -> Result<DateTime<Local>> {
-    let re = Regex::new(r"^(\d+)\s*(m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days|w|week|weeks)$")?;
+    let re = Regex::new(
+        r"^(\d+)\s*(m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days|w|week|weeks)$",
+    )?;
 
     if let Some(caps) = re.captures(input) {
         let amount: i64 = caps[1].parse()?;
@@ -108,7 +110,10 @@ fn parse_natural(input: &str) -> Result<DateTime<Local>> {
         NaiveTime::from_hms_opt(9, 0, 0).unwrap() // Default to 9:00 AM
     } else if let Some(caps) = time_re.captures(time_part) {
         let mut hour: u32 = caps[1].parse()?;
-        let minute: u32 = caps.get(2).map(|m| m.as_str().parse().unwrap()).unwrap_or(0);
+        let minute: u32 = caps
+            .get(2)
+            .map(|m| m.as_str().parse().unwrap())
+            .unwrap_or(0);
         let ampm = caps.get(3).map(|m| m.as_str());
 
         match ampm {
@@ -155,14 +160,16 @@ fn parse_weekday(s: &str) -> Result<Weekday> {
 
 fn next_weekday(from: chrono::NaiveDate, target: Weekday) -> chrono::NaiveDate {
     let current = from.weekday();
-    let days_ahead = (target.num_days_from_monday() as i64 - current.num_days_from_monday() as i64 + 7) % 7;
+    let days_ahead =
+        (target.num_days_from_monday() as i64 - current.num_days_from_monday() as i64 + 7) % 7;
     let days_ahead = if days_ahead == 0 { 7 } else { days_ahead };
     from + Duration::days(days_ahead)
 }
 
 fn this_weekday(from: chrono::NaiveDate, target: Weekday) -> chrono::NaiveDate {
     let current = from.weekday();
-    let days_ahead = (target.num_days_from_monday() as i64 - current.num_days_from_monday() as i64 + 7) % 7;
+    let days_ahead =
+        (target.num_days_from_monday() as i64 - current.num_days_from_monday() as i64 + 7) % 7;
     from + Duration::days(days_ahead)
 }
 
@@ -173,7 +180,7 @@ mod tests {
     #[test]
     fn test_relative_time() {
         let now = Local::now();
-        
+
         let result = parse_time("30m").unwrap();
         assert!((result - now).num_minutes() >= 29 && (result - now).num_minutes() <= 31);
 

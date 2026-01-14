@@ -60,6 +60,18 @@ enum Commands {
         /// Show all including paused
         #[arg(short, long)]
         all: bool,
+
+        /// Disable colored output
+        #[arg(long)]
+        no_color: bool,
+
+        /// Disable title truncation
+        #[arg(long)]
+        no_truncate: bool,
+
+        /// Show full IDs instead of short IDs
+        #[arg(long)]
+        full_id: bool,
     },
 
     /// Show details of a specific reminder
@@ -197,7 +209,13 @@ fn main() -> Result<()> {
             tags,
         } => add_reminder(&storage, title, description, time, cron, tags),
 
-        Commands::List { tag, all } => list_reminders(&storage, tag, all),
+        Commands::List {
+            tag,
+            all,
+            no_color,
+            no_truncate,
+            full_id,
+        } => list_reminders(&storage, tag, all, no_color, no_truncate, full_id),
 
         Commands::Show { id } => show_reminder(&storage, &id),
 
@@ -280,7 +298,10 @@ fn add_reminder(
         println!("  Description: {}", desc);
     }
     if !reminder.tags.is_empty() {
-        println!("  Tags: {}", reminder.tags.iter().cloned().collect::<Vec<_>>().join(", "));
+        println!(
+            "  Tags: {}",
+            reminder.tags.iter().cloned().collect::<Vec<_>>().join(", ")
+        );
     }
     if let Some(next) = reminder.next_trigger {
         println!("  Next trigger: {}", next.format("%Y-%m-%d %H:%M:%S"));
@@ -304,7 +325,14 @@ struct ReminderRow {
     status: String,
 }
 
-fn list_reminders(storage: &Storage, tag_filter: Option<String>, show_all: bool) -> Result<()> {
+fn list_reminders(
+    storage: &Storage,
+    tag_filter: Option<String>,
+    show_all: bool,
+    no_color: bool,
+    no_truncate: bool,
+    full_id: bool,
+) -> Result<()> {
     let mut reminders = if let Some(tag) = tag_filter {
         storage.filter_by_tag(&tag)?
     } else {
@@ -350,8 +378,16 @@ fn list_reminders(storage: &Storage, tag_filter: Option<String>, show_all: bool)
             };
 
             ReminderRow {
-                id: r.id.to_string()[..8].to_string(),
-                title: truncate(&r.title, 25),
+                id: if full_id {
+                    r.id.to_string()
+                } else {
+                    r.id.to_string()[..8].to_string()
+                },
+                title: if no_truncate {
+                    r.title.clone()
+                } else {
+                    truncate(&r.title, 25)
+                },
                 next_trigger: r
                     .next_trigger
                     .map(|t| t.format("%Y-%m-%d %H:%M").to_string())
@@ -384,30 +420,32 @@ fn list_reminders(storage: &Storage, tag_filter: Option<String>, show_all: bool)
     table.with(Style::rounded());
     table.with(Modify::new(Columns::single(3)).with(Width::increase(10)));
 
-    // Gray for completed
-    for row_idx in completed_rows {
-        table.modify(Rows::single(row_idx), Color::FG_BRIGHT_BLACK);
-    }
+    if !no_color {
+        // Gray for completed
+        for row_idx in completed_rows {
+            table.modify(Rows::single(row_idx), Color::FG_BRIGHT_BLACK);
+        }
 
-    // Yellow for paused
-    for row_idx in paused_rows {
-        table.modify(Rows::single(row_idx), Color::FG_YELLOW);
-    }
+        // Yellow for paused
+        for row_idx in paused_rows {
+            table.modify(Rows::single(row_idx), Color::FG_YELLOW);
+        }
 
-    // Cyan for active one-time
-    for row_idx in onetime_rows {
-        table.modify(
-            Rows::single(row_idx).intersect(Columns::single(3)),
-            Color::FG_CYAN,
-        );
-    }
+        // Cyan for active one-time
+        for row_idx in onetime_rows {
+            table.modify(
+                Rows::single(row_idx).intersect(Columns::single(3)),
+                Color::FG_CYAN,
+            );
+        }
 
-    // Green for active periodic
-    for row_idx in periodic_rows {
-        table.modify(
-            Rows::single(row_idx).intersect(Columns::single(3)),
-            Color::FG_GREEN,
-        );
+        // Green for active periodic
+        for row_idx in periodic_rows {
+            table.modify(
+                Rows::single(row_idx).intersect(Columns::single(3)),
+                Color::FG_GREEN,
+            );
+        }
     }
 
     println!("{}", table);
@@ -461,7 +499,7 @@ fn delete_reminder(storage: &Storage, id: &str) -> Result<()> {
         }
         None => {
             log_warn!("Delete failed: reminder not found with ID: {}", id);
-            println!("✗ Reminder not found with ID: {}", id);
+            bail!("Reminder not found with ID: {}", id);
         }
     }
 
@@ -484,7 +522,7 @@ fn edit_reminder(
 
     let uuid = reminder.id;
 
-    let updated = storage.update(uuid, |reminder| {
+    let updated = storage.update(uuid, |reminder| -> Result<()> {
         if let Some(new_title) = title {
             reminder.title = new_title;
         }
@@ -492,20 +530,17 @@ fn edit_reminder(
             reminder.description = Some(new_desc);
         }
         if let Some(time_str) = time {
-            if let Ok(datetime) = parse_time(&time_str) {
-                reminder.schedule = ReminderSchedule::OneTime(datetime);
-                reminder.next_trigger = Some(datetime);
-                reminder.completed = false;
-            }
+            let datetime = parse_time(&time_str)?;
+            reminder.schedule = ReminderSchedule::OneTime(datetime);
+            reminder.next_trigger = Some(datetime);
+            reminder.completed = false;
         }
         if let Some(cron_input) = cron {
-            if let Ok(cron_expr) = parse_cron(&cron_input) {
-                if let Ok(schedule) = Schedule::from_str(&cron_expr) {
-                    reminder.schedule = ReminderSchedule::Cron(cron_expr);
-                    reminder.next_trigger = schedule.upcoming(Local).next();
-                    reminder.completed = false;
-                }
-            }
+            let cron_expr = parse_cron(&cron_input)?;
+            let schedule = Schedule::from_str(&cron_expr)?;
+            reminder.schedule = ReminderSchedule::Cron(cron_expr);
+            reminder.next_trigger = schedule.upcoming(Local).next();
+            reminder.completed = false;
         }
         if let Some(tags) = add_tags {
             for tag in tags {
@@ -517,6 +552,7 @@ fn edit_reminder(
                 reminder.tags.remove(&tag);
             }
         }
+        Ok(())
     })?;
 
     if updated {
@@ -550,7 +586,7 @@ fn pause_reminder(storage: &Storage, id: &str) -> Result<()> {
             println!("✓ Reminder paused (ID: {})", &uuid.to_string()[..8]);
         }
         None => {
-            println!("✗ Reminder not found with ID: {}", id);
+            bail!("Reminder not found with ID: {}", id);
         }
     }
     Ok(())
@@ -563,7 +599,7 @@ fn resume_reminder(storage: &Storage, id: &str) -> Result<()> {
             println!("✓ Reminder resumed (ID: {})", &uuid.to_string()[..8]);
         }
         None => {
-            println!("✗ Reminder not found with ID: {}", id);
+            bail!("Reminder not found with ID: {}", id);
         }
     }
     Ok(())
@@ -618,7 +654,7 @@ fn clean_reminders(storage: &Storage) -> Result<()> {
         log_info!("Cleaned {} completed reminder(s)", removed);
         println!("✓ Cleaned {} completed reminder(s)", removed);
     } else {
-        println!("No completed reminders to clean");
+        bail!("No completed reminders to clean");
     }
 
     Ok(())
@@ -653,10 +689,8 @@ fn logs_info() -> Result<()> {
     let size = logger.size()?;
 
     println!("Log file: {}", logger.path().display());
-    println!(
-        "Size: {:.2} KB / 1024 KB",
-        size as f64 / 1024.0
-    );
+    println!("Size: {:.2} KB / 1024 KB", size as f64 / 1024.0);
+    println!("Rotation: rolls over at 1024 KB into .old file");
 
     Ok(())
 }

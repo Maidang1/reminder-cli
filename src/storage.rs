@@ -93,11 +93,15 @@ impl Storage {
         Ok(true)
     }
 
-    pub fn update(&self, id: Uuid, updater: impl FnOnce(&mut Reminder)) -> Result<bool> {
+    pub fn update(
+        &self,
+        id: Uuid,
+        updater: impl FnOnce(&mut Reminder) -> Result<()>,
+    ) -> Result<bool> {
         let mut reminders = self.load()?;
 
         if let Some(reminder) = reminders.iter_mut().find(|r| r.id == id) {
-            updater(reminder);
+            updater(reminder)?;
             self.save(&reminders)?;
             Ok(true)
         } else {
@@ -221,7 +225,10 @@ impl Storage {
         let reminder = self.find_by_short_id(short_id)?;
         if let Some(r) = reminder {
             let id = r.id;
-            self.update(id, |rem| rem.pause())?;
+            self.update(id, |rem| {
+                rem.pause();
+                Ok(())
+            })?;
             Ok(Some(id))
         } else {
             Ok(None)
@@ -233,7 +240,10 @@ impl Storage {
         let reminder = self.find_by_short_id(short_id)?;
         if let Some(r) = reminder {
             let id = r.id;
-            self.update(id, |rem| rem.resume())?;
+            self.update(id, |rem| {
+                rem.resume();
+                Ok(())
+            })?;
             Ok(Some(id))
         } else {
             Ok(None)

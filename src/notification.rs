@@ -30,7 +30,7 @@ fn log_reminder(reminder: &Reminder) -> Result<()> {
 
     let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
     let description = reminder.description.as_deref().unwrap_or("");
-    
+
     writeln!(
         file,
         "[{}] REMINDER: {} - {}",

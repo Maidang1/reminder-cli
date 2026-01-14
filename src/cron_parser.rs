@@ -3,7 +3,7 @@ use cron::Schedule;
 use std::str::FromStr;
 
 /// Parse cron expression from either standard cron format or English description
-/// 
+///
 /// Examples:
 /// - Standard: "0 0 9 * * *" (every day at 9am)
 /// - English: "every day at 9am", "every monday at 14:00", "every hour"

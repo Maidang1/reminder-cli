@@ -89,10 +89,7 @@ pub fn daemon_status() -> Result<()> {
                         let dt = chrono::DateTime::from_timestamp(timestamp, 0)
                             .map(|t| t.with_timezone(&Local));
                         if let Some(dt) = dt {
-                            println!(
-                                "Last heartbeat: {}",
-                                dt.format("%Y-%m-%d %H:%M:%S")
-                            );
+                            println!("Last heartbeat: {}", dt.format("%Y-%m-%d %H:%M:%S"));
                         }
                     }
                 }
@@ -122,9 +119,7 @@ pub fn is_daemon_running() -> Result<bool> {
 
     #[cfg(unix)]
     {
-        let output = Command::new("kill")
-            .args(["-0", &pid.to_string()])
-            .output();
+        let output = Command::new("kill").args(["-0", &pid.to_string()]).output();
 
         match output {
             Ok(o) => Ok(o.status.success()),
@@ -153,8 +148,6 @@ pub fn is_daemon_running() -> Result<bool> {
         }
     }
 }
-
-
 
 fn write_heartbeat() {
     if let Ok(heartbeat_path) = Storage::heartbeat_file_path() {
@@ -312,7 +305,9 @@ pub fn install_autostart() -> Result<()> {
 
     #[cfg(target_os = "windows")]
     {
-        println!("Windows auto-start: Add a shortcut to 'reminder daemon start' in your Startup folder");
+        println!(
+            "Windows auto-start: Add a shortcut to 'reminder daemon start' in your Startup folder"
+        );
         println!(
             "Startup folder: {}",
             dirs::data_local_dir()
