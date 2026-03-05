@@ -2,15 +2,15 @@ use anyhow::{bail, Result};
 use chrono::Local;
 use clap::{Parser, Subcommand};
 use cron::Schedule;
-use reminder_cli::cron_parser::parse_cron;
-use reminder_cli::daemon::{
+use reminder_core::cron_parser::parse_cron;
+use reminder_core::daemon::{
     daemon_status, install_autostart, run_daemon_loop, start_daemon, stop_daemon,
 };
-use reminder_cli::logger::get_logger;
-use reminder_cli::reminder::{Reminder, ReminderSchedule};
-use reminder_cli::storage::Storage;
-use reminder_cli::time_parser::parse_time;
-use reminder_cli::{log_info, log_warn};
+use reminder_core::logger::get_logger;
+use reminder_core::reminder::{Reminder, ReminderSchedule};
+use reminder_core::storage::Storage;
+use reminder_core::time_parser::parse_time;
+use reminder_core::{log_info, log_warn};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::str::FromStr;

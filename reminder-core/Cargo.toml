@@ -1,0 +1,19 @@
+[package]
+name = "reminder-core"
+version = "0.1.0"
+edition = "2021"
+description = "Core library for reminder functionality"
+license = "MIT"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+cron = "0.12"
+notify-rust = "4.10"
+uuid = { version = "1.6", features = ["v4", "serde"] }
+dirs = "5.0"
+anyhow = "1.0"
+fs2 = "0.4"
+regex = "1.10"
+english-to-cron = "0.1"

@@ -1,5 +1,5 @@
-use crate::reminder::Reminder;
-use crate::storage::Storage;
+use super::reminder::Reminder;
+use super::storage::Storage;
 use anyhow::Result;
 use std::fs::OpenOptions;
 use std::io::Write;

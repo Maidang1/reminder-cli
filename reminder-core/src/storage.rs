@@ -1,4 +1,4 @@
-use crate::reminder::Reminder;
+use super::reminder::Reminder;
 use anyhow::{Context, Result};
 use fs2::FileExt;
 use std::fs;
