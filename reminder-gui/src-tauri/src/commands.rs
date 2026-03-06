@@ -1,9 +1,9 @@
+use reminder_core::cron_parser::parse_cron;
 use reminder_core::reminder::{Reminder, ReminderSchedule};
 use reminder_core::storage::Storage;
 use reminder_core::time_parser::parse_time;
-use reminder_core::cron_parser::parse_cron;
-use reminder_core::notification::send_notification;
 use std::collections::HashSet;
+use tauri_plugin_notification::NotificationExt;
 
 #[derive(serde::Serialize)]
 pub struct ReminderDto {
@@ -79,19 +79,28 @@ pub fn add_reminder(
 #[tauri::command]
 pub fn delete_reminder(id: String) -> Result<bool, String> {
     let storage = Storage::new().map_err(|e| e.to_string())?;
-    storage.delete_by_short_id(&id).map_err(|e| e.to_string()).map(|o| o.is_some())
+    storage
+        .delete_by_short_id(&id)
+        .map_err(|e| e.to_string())
+        .map(|o| o.is_some())
 }
 
 #[tauri::command]
 pub fn pause_reminder(id: String) -> Result<bool, String> {
     let storage = Storage::new().map_err(|e| e.to_string())?;
-    storage.pause_by_short_id(&id).map_err(|e| e.to_string()).map(|o| o.is_some())
+    storage
+        .pause_by_short_id(&id)
+        .map_err(|e| e.to_string())
+        .map(|o| o.is_some())
 }
 
 #[tauri::command]
 pub fn resume_reminder(id: String) -> Result<bool, String> {
     let storage = Storage::new().map_err(|e| e.to_string())?;
-    storage.resume_by_short_id(&id).map_err(|e| e.to_string()).map(|o| o.is_some())
+    storage
+        .resume_by_short_id(&id)
+        .map_err(|e| e.to_string())
+        .map(|o| o.is_some())
 }
 
 #[tauri::command]
@@ -101,7 +110,7 @@ pub fn get_tags() -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
-pub fn test_trigger(id: String) -> Result<bool, String> {
+pub fn test_trigger(app: tauri::AppHandle, id: String) -> Result<bool, String> {
     let storage = Storage::new().map_err(|e| e.to_string())?;
 
     let reminder = storage
@@ -109,7 +118,12 @@ pub fn test_trigger(id: String) -> Result<bool, String> {
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Reminder not found".to_string())?;
 
-    send_notification(&reminder).map_err(|e| e.to_string())?;
+    app.notification()
+        .builder()
+        .title(&reminder.title)
+        .body(reminder.description.as_deref().unwrap_or(""))
+        .show()
+        .map_err(|e| e.to_string())?;
 
     Ok(true)
 }

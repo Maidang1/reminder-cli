@@ -1,6 +1,7 @@
 {
   "name": "reminder-gui",
   "version": "0.1.0",
+  "type": "module",
   "description": "Tauri desktop client for reminder-cli",
   "scripts": {
     "dev": "vite",
@@ -12,6 +13,7 @@
     "@pikoloo/darwin-ui": "^2.0.0",
     "@tailwindcss/vite": "^4.2.1",
     "@tauri-apps/api": "^2.2.0",
+    "@tauri-apps/plugin-notification": "^2.3.3",
     "@tauri-apps/plugin-shell": "^2.0.0",
     "lucide-react": "^0.577.0",
     "react": "^19.2.4",

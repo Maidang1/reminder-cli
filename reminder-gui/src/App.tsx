@@ -1,5 +1,9 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import {
+  isPermissionGranted,
+  requestPermission,
+} from "@tauri-apps/plugin-notification";
 import { Sidebar } from "./components/Sidebar";
 import { ReminderList } from "./components/ReminderList";
 import { Inspector } from "./components/Inspector";
@@ -258,6 +262,18 @@ function App() {
 
   const handleTestTrigger = async (id: string) => {
     try {
+      // Request notification permission if not granted
+      let permissionGranted = await isPermissionGranted();
+      if (!permissionGranted) {
+        const permission = await requestPermission();
+        permissionGranted = permission === "granted";
+      }
+      
+      if (!permissionGranted) {
+        setError("Notification permission not granted");
+        return;
+      }
+      
       await invoke("test_trigger", { id });
     } catch (e) {
       setError(String(e));
