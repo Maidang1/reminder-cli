@@ -75,9 +75,7 @@ impl Reminder {
                 self.next_trigger = None;
             }
             ReminderSchedule::Cron(expr) => {
-                if let Ok(schedule) = Schedule::from_str(expr) {
-                    self.next_trigger = schedule.upcoming(Local).next();
-                }
+                self.next_trigger = next_cron_trigger(expr);
             }
         }
     }
@@ -100,9 +98,7 @@ impl Reminder {
         self.paused = false;
         // Recalculate next trigger for cron jobs
         if let ReminderSchedule::Cron(expr) = &self.schedule {
-            if let Ok(schedule) = Schedule::from_str(expr) {
-                self.next_trigger = schedule.upcoming(Local).next();
-            }
+            self.next_trigger = next_cron_trigger(expr);
         }
     }
 
@@ -115,4 +111,10 @@ impl Reminder {
             "Active"
         }
     }
+}
+
+fn next_cron_trigger(expr: &str) -> Option<DateTime<Local>> {
+    Schedule::from_str(expr)
+        .ok()
+        .and_then(|schedule| schedule.upcoming(Local).next())
 }

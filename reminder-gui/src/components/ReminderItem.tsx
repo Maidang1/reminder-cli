@@ -87,19 +87,19 @@ export function ReminderItem({
         <div className="reminder-title-row">
           <span className="reminder-title">{reminder.title}</span>
           {reminder.paused && (
-            <Badge variant="warning">
-              <Pause size={10} />
-              已暂停
+            <Badge variant="warning" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 6px', fontSize: '11px', lineHeight: '1' }}>
+              <Pause size={10} style={{ display: 'inline-flex', alignItems: 'center' }} />
+              <span>已暂停</span>
             </Badge>
           )}
         </div>
         <div className="reminder-meta-row">
-          <span className="reminder-time">{scheduleText}</span>
+          <span className="reminder-time" style={{ display: 'inline-flex', alignItems: 'center', lineHeight: '1' }}>{scheduleText}</span>
           {reminder.tags.length > 0 && (
-            <span className="reminder-tags-preview">
+            <span className="reminder-tags-preview" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', lineHeight: '1' }}>
               <Tag size={10} />
-              {reminder.tags.slice(0, 2).join(", ")}
-              {reminder.tags.length > 2 && ` +${reminder.tags.length - 2}`}
+              <span>{reminder.tags.slice(0, 2).join(", ")}
+              {reminder.tags.length > 2 && ` +${reminder.tags.length - 2}`}</span>
             </span>
           )}
         </div>

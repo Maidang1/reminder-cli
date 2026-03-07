@@ -201,57 +201,52 @@ export function Inspector({
 
         <div className="inspector-actions">
           {hasChanges && (
-            <Button
-              variant="primary"
-              fullWidth
-              leftIcon={<Save size={14} />}
+            <button
+              className="action-item action-item-primary"
               onClick={handleSave}
             >
-              保存更改
-            </Button>
+              <Save size={16} />
+              <span>保存更改</span>
+            </button>
           )}
 
           {!reminder.completed && (
             <>
-              <Button
-                variant="secondary"
-                fullWidth
-                leftIcon={<Bell size={14} />}
+              <button
+                className="action-item"
                 onClick={() => onTestTrigger(shortId)}
               >
-                测试触发
-              </Button>
+                <Bell size={16} />
+                <span>测试触发</span>
+              </button>
 
               {reminder.paused ? (
-                <Button
-                  variant="secondary"
-                  fullWidth
-                  leftIcon={<Play size={14} />}
+                <button
+                  className="action-item"
                   onClick={() => onResume(shortId)}
                 >
-                  恢复提醒
-                </Button>
+                  <Play size={16} />
+                  <span>恢复提醒</span>
+                </button>
               ) : (
-                <Button
-                  variant="secondary"
-                  fullWidth
-                  leftIcon={<Pause size={14} />}
+                <button
+                  className="action-item"
                   onClick={() => onPause(shortId)}
                 >
-                  暂停提醒
-                </Button>
+                  <Pause size={16} />
+                  <span>暂停提醒</span>
+                </button>
               )}
             </>
           )}
 
-          <Button
-            variant="destructive"
-            fullWidth
-            leftIcon={<Trash2 size={14} />}
+          <button
+            className="action-item action-item-destructive"
             onClick={handleDelete}
           >
-            删除提醒
-          </Button>
+            <Trash2 size={16} />
+            <span>删除提醒</span>
+          </button>
         </div>
       </div>
     </aside>

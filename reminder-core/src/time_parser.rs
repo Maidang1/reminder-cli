@@ -1,6 +1,19 @@
 use anyhow::{bail, Result};
 use chrono::{DateTime, Datelike, Duration, Local, NaiveDateTime, NaiveTime, Weekday};
 use regex::Regex;
+use std::sync::LazyLock;
+
+static RELATIVE_TIME_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"^(\d+)\s*(m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days|w|week|weeks)$",
+    )
+    .expect("relative time regex should compile")
+});
+
+static NATURAL_TIME_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$")
+        .expect("natural time regex should compile")
+});
 
 /// Parse time string supporting multiple formats:
 /// - Absolute: "2025-12-25 10:00"
@@ -43,11 +56,7 @@ fn parse_absolute(input: &str) -> Result<DateTime<Local>> {
 }
 
 fn parse_relative(input: &str) -> Result<DateTime<Local>> {
-    let re = Regex::new(
-        r"^(\d+)\s*(m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days|w|week|weeks)$",
-    )?;
-
-    if let Some(caps) = re.captures(input) {
+    if let Some(caps) = RELATIVE_TIME_RE.captures(input) {
         let amount: i64 = caps[1].parse()?;
         let unit = &caps[2];
 
@@ -68,9 +77,6 @@ fn parse_relative(input: &str) -> Result<DateTime<Local>> {
 fn parse_natural(input: &str) -> Result<DateTime<Local>> {
     let now = Local::now();
     let today = now.date_naive();
-
-    // Parse time part (e.g., "9am", "14:00", "9:30pm")
-    let time_re = Regex::new(r"(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$")?;
 
     let (date_part, time_part) = if let Some(pos) = input.rfind(char::is_whitespace) {
         let (d, t) = input.split_at(pos);
@@ -108,7 +114,7 @@ fn parse_natural(input: &str) -> Result<DateTime<Local>> {
     // Parse the time part
     let target_time = if time_part.is_empty() {
         NaiveTime::from_hms_opt(9, 0, 0).unwrap() // Default to 9:00 AM
-    } else if let Some(caps) = time_re.captures(time_part) {
+    } else if let Some(caps) = NATURAL_TIME_RE.captures(time_part) {
         let mut hour: u32 = caps[1].parse()?;
         let minute: u32 = caps
             .get(2)

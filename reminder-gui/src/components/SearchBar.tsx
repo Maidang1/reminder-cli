@@ -28,7 +28,7 @@ export function SearchBar({
 
   return (
     <div className="search-bar">
-      <Input.Search
+      <Input
         ref={inputRef}
         value={value}
         onChange={(e) => onChange(e.target.value)}

@@ -8,7 +8,7 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
-const POLL_INTERVAL_SECS: u64 = 10;
+const FILE_CHECK_INTERVAL_SECS: u64 = 5;
 const HEARTBEAT_INTERVAL_SECS: u64 = 30;
 const HEARTBEAT_TIMEOUT_SECS: u64 = 120;
 
@@ -182,46 +182,82 @@ pub fn run_daemon_loop() -> Result<()> {
     log_info!("Daemon started");
     write_heartbeat();
 
-    let mut heartbeat_counter = 0u64;
+    let mut reminders = storage.load()?;
+    let mut last_known_mtime = reminders_file_mtime(&storage)?;
+    let mut last_heartbeat_at = std::time::Instant::now();
 
     loop {
-        match storage.load() {
-            Ok(mut reminders) => {
-                let mut updated = false;
-
-                for reminder in reminders.iter_mut() {
-                    if reminder.is_due() {
-                        log_info!("Triggering reminder: {}", reminder.title);
-
-                        if let Err(e) = send_notification(reminder) {
-                            log_error!("Failed to send notification: {}", e);
-                        }
-                        reminder.calculate_next_trigger();
-                        updated = true;
-                    }
+        match reminders_file_mtime(&storage) {
+            Ok(mtime) if mtime != last_known_mtime => match storage.load() {
+                Ok(loaded) => {
+                    reminders = loaded;
+                    last_known_mtime = mtime;
+                    log_debug!("Reloaded reminders after file change");
                 }
+                Err(e) => log_error!("Failed to reload reminders after file change: {}", e),
+            },
+            Ok(_) => {}
+            Err(e) => log_error!("Failed to check reminders file metadata: {}", e),
+        }
 
-                if updated {
-                    if let Err(e) = storage.save(&reminders) {
-                        log_error!("Failed to save reminders: {}", e);
-                    }
+        let mut updated = false;
+        for reminder in &mut reminders {
+            if reminder.is_due() {
+                log_info!("Triggering reminder: {}", reminder.title);
+
+                if let Err(e) = send_notification(reminder) {
+                    log_error!("Failed to send notification: {}", e);
                 }
-            }
-            Err(e) => {
-                log_error!("Failed to load reminders: {}", e);
+                reminder.calculate_next_trigger();
+                updated = true;
             }
         }
 
-        // Write heartbeat periodically
-        heartbeat_counter += POLL_INTERVAL_SECS;
-        if heartbeat_counter >= HEARTBEAT_INTERVAL_SECS {
+        if updated {
+            if let Err(e) = storage.save(&reminders) {
+                log_error!("Failed to save reminders: {}", e);
+            } else {
+                last_known_mtime = reminders_file_mtime(&storage).ok().flatten();
+            }
+        }
+
+        if last_heartbeat_at.elapsed() >= Duration::from_secs(HEARTBEAT_INTERVAL_SECS) {
             write_heartbeat();
             log_debug!("Heartbeat written");
-            heartbeat_counter = 0;
+            last_heartbeat_at = std::time::Instant::now();
         }
 
-        thread::sleep(Duration::from_secs(POLL_INTERVAL_SECS));
+        thread::sleep(next_sleep_duration(&reminders, &last_heartbeat_at));
     }
+}
+
+fn reminders_file_mtime(storage: &Storage) -> Result<Option<std::time::SystemTime>> {
+    match fs::metadata(storage.path()) {
+        Ok(metadata) => Ok(metadata.modified().ok()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(err.into()),
+    }
+}
+
+fn next_sleep_duration(
+    reminders: &[super::reminder::Reminder],
+    last_heartbeat_at: &std::time::Instant,
+) -> Duration {
+    let heartbeat_due_in = Duration::from_secs(HEARTBEAT_INTERVAL_SECS)
+        .saturating_sub(last_heartbeat_at.elapsed());
+
+    let next_trigger_in = reminders
+        .iter()
+        .filter(|reminder| !reminder.completed && !reminder.paused)
+        .filter_map(|reminder| reminder.next_trigger)
+        .filter_map(|next| (next - Local::now()).to_std().ok())
+        .min()
+        .unwrap_or(Duration::from_secs(FILE_CHECK_INTERVAL_SECS));
+
+    next_trigger_in
+        .min(heartbeat_due_in)
+        .min(Duration::from_secs(FILE_CHECK_INTERVAL_SECS))
+        .max(Duration::from_secs(1))
 }
 
 /// Generate launchd plist for macOS auto-start
